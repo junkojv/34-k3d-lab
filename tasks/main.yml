@@ -99,7 +99,7 @@
   delegate_to: localhost
   run_once: true
 
-- name: Recuperer l IP passerelle du conteneur ansible
+- name: Recuperer l IP passerelle Docker
   ansible.builtin.shell: ip route | awk '/default/ {print $3; exit}'
   register: docker_gateway
   changed_when: false
