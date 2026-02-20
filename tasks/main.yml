@@ -1,0 +1,67 @@
+---
+- name: Verifier si docker est installe
+  ansible.builtin.command: docker --version
+  register: docker_check
+  failed_when: false
+  changed_when: false
+
+- name: Installer docker si absent
+  ansible.builtin.shell: curl -fsSL https://get.docker.com | sh
+  become: true
+  when: docker_check.rc != 0
+
+- name: Verifier si kubectl est installe
+  ansible.builtin.command: kubectl version --client
+  register: kubectl_check
+  failed_when: false
+  changed_when: false
+
+- name: Installer kubectl si absent
+  ansible.builtin.shell: |
+    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    install -m 0755 kubectl /usr/local/bin/kubectl
+  become: true
+  when: kubectl_check.rc != 0
+
+- name: Verifier si k3d est installe
+  ansible.builtin.command: k3d version
+  register: k3d_check
+  failed_when: false
+  changed_when: false
+
+- name: Installer k3d si absent
+  ansible.builtin.shell: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+  become: true
+  when: k3d_check.rc != 0
+
+- name: Verifier si le cluster existe
+  ansible.builtin.command: k3d cluster list --no-headers
+  register: k3d_clusters
+  changed_when: false
+  failed_when: false
+
+- name: Creer le cluster si absent
+  ansible.builtin.command: timeout 240 k3d cluster create {{ k3d_cluster_name }} --servers 1 --agents 1 -p {{ k3d_nodeport }}:{{ k3d_nodeport }}@agent:0
+  when: k3d_cluster_name not in k3d_clusters.stdout
+
+- name: Generer le manifest nginx
+  ansible.builtin.template:
+    src: nginx.yaml.j2
+    dest: "{{ k3d_manifest_path }}"
+    mode: "0644"
+
+- name: Recuperer le kubeconfig du cluster
+  ansible.builtin.command: k3d kubeconfig write {{ k3d_cluster_name }}
+  register: kubeconfig_path
+  changed_when: false
+
+- name: Appliquer le manifest
+  ansible.builtin.command: kubectl apply -f {{ k3d_manifest_path }} --validate=false --request-timeout=20s
+  register: kubectl_apply
+  changed_when: "'configured' in kubectl_apply.stdout or 'created' in kubectl_apply.stdout"
+  environment:
+    KUBECONFIG: "{{ kubeconfig_path.stdout }}"
+
+- name: Afficher URL d acces
+  ansible.builtin.debug:
+    msg: "URL d'acces : http://localhost:{{ k3d_nodeport }}"

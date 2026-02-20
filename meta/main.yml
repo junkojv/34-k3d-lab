@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  author: 9junko9
+  description: Deploy a local k3d cluster and nginx NodePort service.
+  license: MIT
+  min_ansible_version: "2.12"
+
+dependencies: []
