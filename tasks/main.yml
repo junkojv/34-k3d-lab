@@ -11,7 +11,16 @@
   when: docker_check.rc != 0
   delegate_to: localhost
   run_once: true
-  become: true
+
+- name: Demarrer dockerd sur le controleur si non fonctionnel
+  ansible.builtin.shell: |
+    if ! docker info > /dev/null 2>&1; then
+      dockerd > /var/log/dockerd.log 2>&1 &
+      timeout 30 sh -c 'until docker info > /dev/null 2>&1; do sleep 1; done'
+    fi
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
 
 - name: Verifier si kubectl est installe sur le controleur
   ansible.builtin.command: kubectl version --client
@@ -28,7 +37,6 @@
   when: kubectl_check.rc != 0
   delegate_to: localhost
   run_once: true
-  become: true
 
 - name: Verifier si k3d est installe sur le controleur
   ansible.builtin.command: k3d version
@@ -43,7 +51,6 @@
   when: k3d_check.rc != 0
   delegate_to: localhost
   run_once: true
-  become: true
 
 - name: Verifier si le cluster existe sur le controleur
   ansible.builtin.command: k3d cluster list --no-headers
@@ -74,8 +81,19 @@
   delegate_to: localhost
   run_once: true
 
+- name: Verifier si le kubeconfig stable existe deja
+  ansible.builtin.stat:
+    path: "{{ k3d_kubeconfig_path }}"
+  register: kubeconfig_stable
+  delegate_to: localhost
+  run_once: true
+
 - name: Copier le kubeconfig vers un chemin stable
-  ansible.builtin.command: cp {{ kubeconfig_path.stdout }} {{ k3d_kubeconfig_path }}
+  ansible.builtin.copy:
+    src: "{{ kubeconfig_path.stdout }}"
+    dest: "{{ k3d_kubeconfig_path }}"
+    remote_src: true
+  when: not kubeconfig_stable.stat.exists
   delegate_to: localhost
   run_once: true
 
