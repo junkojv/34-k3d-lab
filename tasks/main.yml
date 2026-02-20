@@ -1,67 +1,129 @@
 ---
-- name: Verifier si docker est installe
+- name: Installer prerequis Debian
+  ansible.builtin.apt:
+    name:
+      - curl
+      - ca-certificates
+      - gnupg
+    state: present
+    update_cache: true
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Installer prerequis RedHat
+  ansible.builtin.dnf:
+    name:
+      - curl-minimal
+      - ca-certificates
+      - gnupg2
+    state: present
+  when: ansible_facts['os_family'] == 'RedHat'
+
+- name: Verifier si docker est installe sur le controleur
   ansible.builtin.command: docker --version
   register: docker_check
   failed_when: false
   changed_when: false
+  delegate_to: localhost
+  run_once: true
 
-- name: Installer docker si absent
+- name: Installer docker sur le controleur si absent
   ansible.builtin.shell: curl -fsSL https://get.docker.com | sh
-  become: true
   when: docker_check.rc != 0
+  delegate_to: localhost
+  run_once: true
+  become: true
 
-- name: Verifier si kubectl est installe
+- name: Verifier si kubectl est installe sur le controleur
   ansible.builtin.command: kubectl version --client
   register: kubectl_check
   failed_when: false
   changed_when: false
+  delegate_to: localhost
+  run_once: true
 
-- name: Installer kubectl si absent
+- name: Installer kubectl sur le controleur si absent
   ansible.builtin.shell: |
     curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
     install -m 0755 kubectl /usr/local/bin/kubectl
-  become: true
   when: kubectl_check.rc != 0
+  delegate_to: localhost
+  run_once: true
+  become: true
 
-- name: Verifier si k3d est installe
+- name: Verifier si k3d est installe sur le controleur
   ansible.builtin.command: k3d version
   register: k3d_check
   failed_when: false
   changed_when: false
+  delegate_to: localhost
+  run_once: true
 
-- name: Installer k3d si absent
+- name: Installer k3d sur le controleur si absent
   ansible.builtin.shell: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
-  become: true
   when: k3d_check.rc != 0
+  delegate_to: localhost
+  run_once: true
+  become: true
 
-- name: Verifier si le cluster existe
+- name: Verifier si le cluster existe sur le controleur
   ansible.builtin.command: k3d cluster list --no-headers
   register: k3d_clusters
   changed_when: false
   failed_when: false
+  delegate_to: localhost
+  run_once: true
 
-- name: Creer le cluster si absent
+- name: Creer le cluster si absent sur le controleur
   ansible.builtin.command: timeout 240 k3d cluster create {{ k3d_cluster_name }} --servers 1 --agents 1 -p {{ k3d_nodeport }}:{{ k3d_nodeport }}@agent:0
   when: k3d_cluster_name not in k3d_clusters.stdout
+  delegate_to: localhost
+  run_once: true
 
-- name: Generer le manifest nginx
+- name: Generer le manifest nginx sur le controleur
   ansible.builtin.template:
     src: nginx.yaml.j2
     dest: "{{ k3d_manifest_path }}"
     mode: "0644"
+  delegate_to: localhost
+  run_once: true
 
-- name: Recuperer le kubeconfig du cluster
+- name: Recuperer le kubeconfig du cluster sur le controleur
   ansible.builtin.command: k3d kubeconfig write {{ k3d_cluster_name }}
   register: kubeconfig_path
   changed_when: false
+  delegate_to: localhost
+  run_once: true
 
-- name: Appliquer le manifest
-  ansible.builtin.command: kubectl apply -f {{ k3d_manifest_path }} --validate=false --request-timeout=20s
+- name: Copier le kubeconfig vers un chemin stable
+  ansible.builtin.command: cp {{ kubeconfig_path.stdout }} {{ k3d_kubeconfig_path }}
+  delegate_to: localhost
+  run_once: true
+
+- name: Recuperer l IP passerelle du conteneur ansible
+  ansible.builtin.shell: ip route | awk '/default/ {print $3; exit}'
+  register: docker_gateway
+  changed_when: false
+  delegate_to: localhost
+  run_once: true
+
+- name: Corriger endpoint kubeconfig si 0.0.0.0
+  ansible.builtin.replace:
+    path: "{{ k3d_kubeconfig_path }}"
+    regexp: 'https://0\.0\.0\.0:'
+    replace: "https://{{ docker_gateway.stdout }}:"
+  delegate_to: localhost
+  run_once: true
+
+- name: Appliquer le manifest sur le controleur
+  ansible.builtin.command: kubectl apply -f {{ k3d_manifest_path }} --validate=false --request-timeout=20s --insecure-skip-tls-verify=true
   register: kubectl_apply
   changed_when: "'configured' in kubectl_apply.stdout or 'created' in kubectl_apply.stdout"
   environment:
-    KUBECONFIG: "{{ kubeconfig_path.stdout }}"
+    KUBECONFIG: "{{ k3d_kubeconfig_path }}"
+  delegate_to: localhost
+  run_once: true
 
 - name: Afficher URL d acces
   ansible.builtin.debug:
-    msg: "URL d'acces : http://localhost:{{ k3d_nodeport }}"
+    msg: "Service disponible sur http://localhost:{{ k3d_nodeport }}"
+  run_once: true

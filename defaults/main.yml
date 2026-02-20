@@ -1,4 +1,5 @@
 ---
 k3d_cluster_name: "k3d-lab"
 k3d_nodeport: 30080
-k3d_manifest_path: "./nginx.yaml"
+k3d_manifest_path: "/tmp/nginx.yaml"
+k3d_kubeconfig_path: "/tmp/kubeconfig-k3d-lab.yaml"
